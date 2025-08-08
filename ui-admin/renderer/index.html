@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parental Control Admin</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2><i class="fas fa-shield-alt"></i> Parental Control</h2>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-section="dashboard">
+                    <i class="fas fa-home"></i> Dashboard
+                </li>
+                <li class="nav-item" data-section="rules">
+                    <i class="fas fa-ban"></i> Block Rules
+                </li>
+                <li class="nav-item" data-section="logs">
+                    <i class="fas fa-list"></i> DNS Logs
+                </li>
+                <li class="nav-item" data-section="ai-assistant">
+                    <i class="fas fa-robot"></i> AI Assistant
+                </li>
+                <li class="nav-item" data-section="profiles">
+                    <i class="fas fa-users"></i> Profiles
+                </li>
+                <li class="nav-item" data-section="settings">
+                    <i class="fas fa-cog"></i> Settings
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <h1 id="page-title">Dashboard</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="refresh-btn">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <section id="system-status" class="content-section">
+    <div class="system-status-container">
+        <h2><i class="fas fa-cogs"></i> System Configuration Status</h2>
+        
+        <div class="status-grid">
+            <div class="status-card" id="dns-status">
+                <div class="status-icon">
+                    <i class="fas fa-network-wired"></i>
+                </div>
+                <div class="status-content">
+                    <h3>DNS Configuration</h3>
+                    <p id="dns-status-text">Checking...</p>
+                    <button class="btn btn-sm btn-primary" id="fix-dns-btn" style="display: none;">
+                        Fix DNS
+                    </button>
+                </div>
+            </div>
+            
+            <div class="status-card" id="doh-status">
+                <div class="status-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div class="status-content">
+                    <h3>DNS over HTTPS</h3>
+                    <p id="doh-status-text">Checking...</p>
+                    <button class="btn btn-sm btn-primary" id="fix-doh-btn" style="display: none;">
+                        Disable DoH
+                    </button>
+                </div>
+            </div>
+            
+            <div class="status-card" id="firewall-status">
+                <div class="status-icon">
+                    <i class="fas fa-fire"></i>
+                </div>
+                <div class="status-content">
+                    <h3>Firewall Rules</h3>
+                    <p id="firewall-status-text">Checking...</p>
+                    <button class="btn btn-sm btn-primary" id="fix-firewall-btn" style="display: none;">
+                        Configure Firewall
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="system-actions">
+            <button class="btn btn-success" id="auto-configure-btn">
+                <i class="fas fa-magic"></i> Auto Configure System
+            </button>
+            <button class="btn btn-warning" id="restore-system-btn">
+                <i class="fas fa-undo"></i> Restore Original Settings
+            </button>
+            <button class="btn btn-info" id="check-status-btn">
+                <i class="fas fa-sync"></i> Check Status
+            </button>
+        </div>
+        
+        <div class="system-info">
+            <h3>Configuration Details</h3>
+            <ul>
+                <li><strong>DNS Server:</strong> Points to 127.0.0.1 (localhost)</li>
+                <li><strong>DoH Blocking:</strong> Disabled in Chrome, Edge, Firefox</li>
+                <li><strong>Firewall:</strong> Blocks UDP 443 (QUIC), Allows DNS port 53</li>
+                <li><strong>Service:</strong> Runs as Windows Service with system privileges</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<li class="nav-item" data-section="system-status">
+    <i class="fas fa-cogs"></i> System Status
+</li>
+                <!-- Dashboard Section -->
+                <section id="dashboard" class="content-section active">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-ban"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="total-rules">0</h3>
+                                <p>Active Rules</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="blocked-today">0</h3>
+                                <p>Blocked Today</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>1</h3>
+                                <p>Active Profiles</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-charts">
+                        <div class="chart-container">
+                            <h3>Top Blocked Domains (Last 7 Days)</h3>
+                            <div id="top-blocked-list" class="top-blocked-list">
+                                <!-- Dynamically populated -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Block Rules Section -->
+                <section id="rules" class="content-section">
+                    <div class="section-header">
+                        <h2>Block Rules</h2>
+                        <button class="btn btn-success" id="add-rule-btn">
+                            <i class="fas fa-plus"></i> Add Rule
+                        </button>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="data-table" id="rules-table">
+                            <thead>
+                                <tr>
+                                    <th>Domain</th>
+                                    <th>Category</th>
+                                    <th>Reason</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Dynamically populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- DNS Logs Section -->
+                <section id="logs" class="content-section">
+                    <div class="section-header">
+                        <h2>DNS Query Logs</h2>
+                        <div class="filter-controls">
+                            <select id="log-filter">
+                                <option value="all">All Actions</option>
+                                <option value="blocked">Blocked Only</option>
+                                <option value="allowed">Allowed Only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="data-table" id="logs-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Domain</th>
+                                    <th>Client IP</th>
+                                    <th>Query Type</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Dynamically populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- AI Assistant Section -->
+                <section id="ai-assistant" class="content-section">
+                    <div class="ai-container">
+                        <h2><i class="fas fa-robot"></i> AI Block Suggestion Assistant</h2>
+                        <div class="ai-form">
+                            <div class="form-group">
+                                <label for="ai-topic">Topic/Content Type:</label>
+                                <input type="text" id="ai-topic" placeholder="e.g., game bạo lực, cờ bạc, khiêu dâm">
+                            </div>
+                            <div class="form-group">
+                                <label for="ai-category">Category:</label>
+                                <select id="ai-category">
+                                    <option value="violence">Violence</option>
+                                    <option value="gambling">Gambling</option>
+                                    <option value="adult">Adult Content</option>
+                                    <option value="social">Social Media</option>
+                                    <option value="gaming">Gaming</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" id="generate-suggestions">
+                                <i class="fas fa-magic"></i> Generate Suggestions
+                            </button>
+                        </div>
+
+                        <div id="ai-results" class="ai-results" style="display: none;">
+                            <h3>AI Suggestions:</h3>
+                            <div id="suggestions-list" class="suggestions-list">
+                                <!-- Dynamically populated -->
+                            </div>
+                            <div class="ai-actions">
+                                <button class="btn btn-success" id="add-selected-rules">
+                                    <i class="fas fa-plus"></i> Add Selected Rules
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Profiles Section -->
+                <section id="profiles" class="content-section">
+                    <div class="section-header">
+                        <h2>User Profiles</h2>
+                        <button class="btn btn-success" id="add-profile-btn">
+                            <i class="fas fa-user-plus"></i> Add Profile
+                        </button>
+                    </div>
+
+                    <div class="profiles-grid">
+                        <!-- Dynamically populated -->
+                    </div>
+                </section>
+
+                <!-- Settings Section -->
+                <section id="settings" class="content-section">
+                    <div class="settings-container">
+                        <h2>System Settings</h2>
+                        
+                        <div class="setting-group">
+                            <h3>DNS Configuration</h3>
+                            <div class="form-group">
+                                <label for="upstream-dns">Upstream DNS Server:</label>
+                                <input type="text" id="upstream-dns" value="1.1.1.1:53">
+                            </div>
+                            <div class="form-group">
+                                <label for="dns-port">DNS Port:</label>
+                                <input type="number" id="dns-port" value="53">
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <h3>Security</h3>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="block-doh"> Block DNS over HTTPS (DoH)
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="block-vpn"> Block Common VPN Services
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-actions">
+                            <button class="btn btn-primary" id="save-settings">
+                                <i class="fas fa-save"></i> Save Settings
+                            </button>
+                            <button class="btn btn-secondary" id="reset-settings">
+                                <i class="fas fa-undo"></i> Reset to Defaults
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="add-rule-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Add Block Rule</h2>
+            <form id="add-rule-form">
+                <div class="form-group">
+                    <label for="rule-domain">Domain:</label>
+                    <input type="text" id="rule-domain" required placeholder="example.com">
+                </div>
+                <div class="form-group">
+                    <label for="rule-category">Category:</label>
+                    <select id="rule-category">
+                        <option value="violence">Violence</option>
+                        <option value="gambling">Gambling</option>
+                        <option value="adult">Adult Content</option>
+                        <option value="social">Social Media</option>
+                        <option value="gaming">Gaming</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rule-reason">Reason:</label>
+                    <textarea id="rule-reason" placeholder="Why block this domain?"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Add Rule</button>
+                    <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

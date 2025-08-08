@@ -1,0 +1,33 @@
+{
+  "name": "parental-control-ui",
+  "version": "1.0.0",
+  "description": "Parental Control Admin UI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dist": "npm run build"
+  },
+  "dependencies": {
+    "electron": "^25.0.0",
+    "axios": "^1.4.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.parentalcontrol.admin",
+    "productName": "Parental Control",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  }
+}

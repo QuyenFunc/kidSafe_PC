@@ -1,0 +1,25 @@
+    # ## Dependencies ##
+# Bỏ qua thư mục chứa các thư viện của Node.js
+/ui-admin/node_modules
+
+# ## Build Artifacts ##
+# Bỏ qua các file thực thi (executable) được tạo ra sau khi build
+# Dấu * đại diện cho bất kỳ tên file nào có đuôi .exe
+*.exe
+
+# Bỏ qua các file database, thường chứa dữ liệu tạm thời hoặc dữ liệu của người dùng
+*.db
+
+# ## Go specific ##
+# Thư mục build của Go
+/bin/
+/pkg/
+
+# ## Installer specific ##
+# Bỏ qua các file hoặc thư mục liên quan đến bộ cài đặt
+/installer/Output/
+
+# ## System specific ##
+# Bỏ qua các file của hệ điều hành
+.DS_Store
+Thumbs.db
