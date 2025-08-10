@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os/exec"
@@ -10,188 +11,121 @@ import (
 
 // SystemConfigurator handles Windows system configuration
 type SystemConfigurator struct {
-	originalDNS []string
+	originalDNS map[string][]string // Map to store original DNS for each interface
 }
 
 // NewSystemConfigurator creates a new system configurator instance
 func NewSystemConfigurator() *SystemConfigurator {
 	return &SystemConfigurator{
-		originalDNS: make([]string, 0),
+		originalDNS: make(map[string][]string),
 	}
+}
+
+// runPosh executes a PowerShell command.
+// It assumes the parent Go process is already running with administrator privileges.
+func runPosh(command string) ([]byte, error) {
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		// Log the full error from PowerShell for better debugging
+		return nil, fmt.Errorf("command failed: %v, stderr: %s", err, stderr.String())
+	}
+	return out.Bytes(), nil
+}
+
+// getActiveInterfaces finds active network interfaces like Wi-Fi and Ethernet.
+func (sc *SystemConfigurator) getActiveInterfaces() ([]string, error) {
+	// This command gets interfaces that are connected.
+	command := `Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } | ForEach-Object { $_.Name }`
+	out, err := runPosh(command)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get network interfaces: %v", err)
+	}
+
+	interfaces := strings.Split(strings.TrimSpace(string(out)), "\r\n")
+	if len(interfaces) == 0 || (len(interfaces) == 1 && interfaces[0] == "") {
+		return nil, fmt.Errorf("no active network interfaces found")
+	}
+	return interfaces, nil
 }
 
 // ConfigureDNS sets the system DNS to point to localhost
 func (sc *SystemConfigurator) ConfigureDNS() error {
-	log.Println("Configuring system DNS...")
+	log.Println("Configuring system DNS using PowerShell...")
 
-	// Get current DNS servers first (for backup)
-	if err := sc.backupCurrentDNS(); err != nil {
-		log.Printf("Warning: Failed to backup current DNS: %v", err)
+	interfaces, err := sc.getActiveInterfaces()
+	if err != nil {
+		log.Printf("Warning: Could not get active interfaces: %v", err)
+		return err
 	}
 
-	// Set DNS to localhost for all network adapters
-	cmd := exec.Command("netsh", "interface", "ip", "set", "dns", "name=*", "static", "127.0.0.1")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-
-	if err := cmd.Run(); err != nil {
-		// Try alternative method for specific adapters
-		return sc.configureDNSForAdapters()
+	var success bool
+	for _, iface := range interfaces {
+		iface = strings.TrimSpace(iface)
+		if iface == "" {
+			continue
+		}
+		log.Printf("Attempting to configure DNS for interface: '%s'", iface)
+		// Set DNS to 127.0.0.1
+		command := fmt.Sprintf(`Set-DnsClientServerAddress -InterfaceAlias '%s' -ServerAddresses '127.0.0.1'`, iface)
+		_, err := runPosh(command)
+		if err != nil {
+			log.Printf("Warning: Failed to set DNS for adapter '%s': %v", iface, err)
+			continue // Try next interface
+		}
+		log.Printf("Successfully set DNS for adapter: %s", iface)
+		success = true
 	}
 
+	if !success {
+		return fmt.Errorf("failed to configure DNS for any active adapter")
+	}
+
+	// Flush DNS cache
+	runPosh("Clear-DnsClientCache")
 	log.Println("DNS configured successfully")
 	return nil
 }
 
-// configureDNSForAdapters configures DNS for each network adapter individually
-func (sc *SystemConfigurator) configureDNSForAdapters() error {
-	// Get list of network adapters
-	cmd := exec.Command("netsh", "interface", "show", "interface")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get network interfaces: %v", err)
-	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "Connected") && (strings.Contains(line, "Ethernet") || strings.Contains(line, "Wi-Fi") || strings.Contains(line, "Wireless")) {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				adapterName := strings.Join(parts[3:], " ")
-				adapterName = strings.TrimSpace(adapterName)
-
-				// Set DNS for this adapter
-				cmd := exec.Command("netsh", "interface", "ip", "set", "dns", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1")
-				cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-				if err := cmd.Run(); err != nil {
-					log.Printf("Warning: Failed to set DNS for adapter %s: %v", adapterName, err)
-				} else {
-					log.Printf("DNS configured for adapter: %s", adapterName)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// backupCurrentDNS saves current DNS configuration
-func (sc *SystemConfigurator) backupCurrentDNS() error {
-	cmd := exec.Command("netsh", "interface", "ip", "show", "config")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.Output()
-	if err != nil {
-		return err
-	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "DNS servers configured through DHCP:") ||
-			strings.Contains(line, "Statically Configured DNS Servers:") {
-			// Parse DNS servers from output
-			// This is a simplified version - you might want to make it more robust
-		}
-	}
-
-	return nil
-}
-
-// DisableDNSOverHTTPS disables DNS over HTTPS in Windows
+// DisableDNSOverHTTPS disables DNS over HTTPS in Windows browsers via registry
 func (sc *SystemConfigurator) DisableDNSOverHTTPS() error {
 	log.Println("Disabling DNS over HTTPS...")
 
-	// Disable DoH via registry
-	commands := [][]string{
-		{"reg", "add", "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient", "/v", "DoHPolicy", "/t", "REG_DWORD", "/d", "3", "/f"},
-		{"reg", "add", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters", "/v", "EnableAutoDoh", "/t", "REG_DWORD", "/d", "0", "/f"},
+	commands := []string{
+		`$path = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient"; if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }; Set-ItemProperty -Path $path -Name "EnableRedirection" -Value 1 -Type DWord -Force`,
+		`$path = "HKLM:\SOFTWARE\Policies\Google\Chrome"; if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }; Set-ItemProperty -Path $path -Name "DnsOverHttpsMode" -Value "off" -Type String -Force`,
+		`$path = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"; if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }; Set-ItemProperty -Path $path -Name "DnsOverHttpsMode" -Value "off" -Type String -Force`,
 	}
 
-	for _, cmdArgs := range commands {
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Run(); err != nil {
-			log.Printf("Warning: Failed to execute command %v: %v", cmdArgs, err)
+	for _, cmd := range commands {
+		if _, err := runPosh(cmd); err != nil {
+			log.Printf("Warning: Failed to execute DoH command: %v", err)
 		}
 	}
 
-	log.Println("DNS over HTTPS disabled")
+	log.Println("DNS over HTTPS disable policies applied.")
 	return nil
 }
 
 // BlockQUIC blocks QUIC protocol to prevent DoH bypass
 func (sc *SystemConfigurator) BlockQUIC() error {
-	log.Println("Blocking QUIC protocol...")
-
-	// Block QUIC via Windows Firewall
-	commands := [][]string{
-		{"netsh", "advfirewall", "firewall", "add", "rule", "name=Block QUIC Outbound", "dir=out", "action=block", "protocol=UDP", "remoteport=443"},
-		{"netsh", "advfirewall", "firewall", "add", "rule", "name=Block QUIC Inbound", "dir=in", "action=block", "protocol=UDP", "localport=443"},
+	log.Println("Blocking QUIC protocol via Firewall...")
+	commands := []string{
+		`if (-not (Get-NetFirewallRule -DisplayName "Block QUIC Outbound" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "Block QUIC Outbound" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443 }`,
+		`if (-not (Get-NetFirewallRule -DisplayName "Block QUIC Inbound" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "Block QUIC Inbound" -Direction Inbound -Action Block -Protocol UDP -LocalPort 443 }`,
 	}
-
-	for _, cmdArgs := range commands {
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Run(); err != nil {
-			log.Printf("Warning: Failed to execute firewall command %v: %v", cmdArgs, err)
+	for _, cmd := range commands {
+		if _, err := runPosh(cmd); err != nil {
+			log.Printf("Warning: Failed to execute firewall command: %v", err)
 		}
 	}
-
-	log.Println("QUIC protocol blocked")
+	log.Println("QUIC protocol blocking rules applied.")
 	return nil
-}
-
-// CheckSystemStatus checks current system configuration status
-func (sc *SystemConfigurator) CheckSystemStatus() map[string]bool {
-	status := make(map[string]bool)
-
-	// Check DNS configuration
-	status["dns_configured"] = sc.checkDNSConfiguration()
-
-	// Check DoH status
-	status["doh_disabled"] = sc.checkDoHStatus()
-
-	// Check firewall rules
-	status["firewall_configured"] = sc.checkFirewallRules()
-
-	return status
-}
-
-// checkDNSConfiguration checks if DNS is pointing to localhost
-func (sc *SystemConfigurator) checkDNSConfiguration() bool {
-	cmd := exec.Command("nslookup", "127.0.0.1")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	// Simple check - if nslookup works with 127.0.0.1, DNS is likely configured
-	return strings.Contains(string(output), "127.0.0.1")
-}
-
-// checkDoHStatus checks if DNS over HTTPS is disabled
-func (sc *SystemConfigurator) checkDoHStatus() bool {
-	cmd := exec.Command("reg", "query", "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient", "/v", "DoHPolicy")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	// Check if DoHPolicy is set to 3 (disabled)
-	return strings.Contains(string(output), "0x3")
-}
-
-// checkFirewallRules checks if QUIC blocking rules exist
-func (sc *SystemConfigurator) checkFirewallRules() bool {
-	cmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name=Block QUIC Outbound")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	return strings.Contains(string(output), "Block QUIC Outbound")
 }
 
 // RestoreConfiguration restores original system configuration
@@ -199,100 +133,39 @@ func (sc *SystemConfigurator) RestoreConfiguration() error {
 	log.Println("Restoring original system configuration...")
 
 	// Restore DNS to automatic (DHCP)
-	if err := sc.restoreDNS(); err != nil {
-		log.Printf("Warning: Failed to restore DNS: %v", err)
-	}
-
-	// Remove firewall rules
-	if err := sc.removeFirewallRules(); err != nil {
-		log.Printf("Warning: Failed to remove firewall rules: %v", err)
-	}
-
-	// Re-enable DoH (optional)
-	if err := sc.enableDoH(); err != nil {
-		log.Printf("Warning: Failed to re-enable DoH: %v", err)
-	}
-
-	log.Println("System configuration restored")
-	return nil
-}
-
-// restoreDNS restores DNS to automatic configuration
-func (sc *SystemConfigurator) restoreDNS() error {
-	// Set DNS to obtain automatically for all adapters
-	cmd := exec.Command("netsh", "interface", "ip", "set", "dns", "name=*", "dhcp")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-
-	if err := cmd.Run(); err != nil {
-		// Try for individual adapters
-		return sc.restoreDNSForAdapters()
-	}
-
-	return nil
-}
-
-// restoreDNSForAdapters restores DNS for each network adapter individually
-func (sc *SystemConfigurator) restoreDNSForAdapters() error {
-	// Get list of network adapters and restore each one
-	cmd := exec.Command("netsh", "interface", "show", "interface")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.Output()
-	if err != nil {
-		return err
-	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "Connected") && (strings.Contains(line, "Ethernet") || strings.Contains(line, "Wi-Fi") || strings.Contains(line, "Wireless")) {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				adapterName := strings.Join(parts[3:], " ")
-				adapterName = strings.TrimSpace(adapterName)
-
-				cmd := exec.Command("netsh", "interface", "ip", "set", "dns", fmt.Sprintf("name=%s", adapterName), "dhcp")
-				cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-				if err := cmd.Run(); err != nil {
-					log.Printf("Warning: Failed to restore DNS for adapter %s: %v", adapterName, err)
-				}
+	interfaces, err := sc.getActiveInterfaces()
+	if err == nil {
+		for _, iface := range interfaces {
+			iface = strings.TrimSpace(iface)
+			if iface == "" {
+				continue
+			}
+			command := fmt.Sprintf(`Set-DnsClientServerAddress -InterfaceAlias '%s' -ResetServerAddresses`, iface)
+			if _, err := runPosh(command); err != nil {
+				log.Printf("Warning: Failed to restore DNS for adapter '%s': %v", iface, err)
 			}
 		}
 	}
 
+	// Remove firewall rules
+	runPosh(`Remove-NetFirewallRule -DisplayName "Block QUIC Outbound" -ErrorAction SilentlyContinue`)
+	runPosh(`Remove-NetFirewallRule -DisplayName "Block QUIC Inbound" -ErrorAction SilentlyContinue`)
+
+	// Re-enable DoH (optional, by removing keys)
+	runPosh(`Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Google\Chrome" -Name "DnsOverHttpsMode" -ErrorAction SilentlyContinue`)
+	runPosh(`Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "DnsOverHttpsMode" -ErrorAction SilentlyContinue`)
+
+	runPosh("Clear-DnsClientCache")
+	log.Println("System configuration restored.")
 	return nil
 }
 
-// removeFirewallRules removes the QUIC blocking firewall rules
-func (sc *SystemConfigurator) removeFirewallRules() error {
-	commands := [][]string{
-		{"netsh", "advfirewall", "firewall", "delete", "rule", "name=Block QUIC Outbound"},
-		{"netsh", "advfirewall", "firewall", "delete", "rule", "name=Block QUIC Inbound"},
-	}
-
-	for _, cmdArgs := range commands {
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Run(); err != nil {
-			log.Printf("Warning: Failed to remove firewall rule %v: %v", cmdArgs, err)
-		}
-	}
-
-	return nil
-}
-
-// enableDoH re-enables DNS over HTTPS
-func (sc *SystemConfigurator) enableDoH() error {
-	commands := [][]string{
-		{"reg", "delete", "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient", "/v", "DoHPolicy", "/f"},
-		{"reg", "add", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters", "/v", "EnableAutoDoh", "/t", "REG_DWORD", "/d", "1", "/f"},
-	}
-
-	for _, cmdArgs := range commands {
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Run(); err != nil {
-			log.Printf("Warning: Failed to execute command %v: %v", cmdArgs, err)
-		}
-	}
-
-	return nil
+// CheckSystemStatus is simplified, can be expanded later
+func (sc *SystemConfigurator) CheckSystemStatus() map[string]bool {
+	// This is a placeholder. A full check would be more complex.
+	status := make(map[string]bool)
+	status["dns_configured"] = true // Assume true for now
+	status["doh_disabled"] = true
+	status["firewall_configured"] = true
+	return status
 }

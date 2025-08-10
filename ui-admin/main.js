@@ -5,7 +5,7 @@ const axios = require('axios');
 
 let mainWindow;
 let coreService;
-const API_BASE = 'http://127.0.0.1:8080/api/v1';
+const API_BASE = 'http://127.0.0.1:8081/api/v1';
 
 function createWindow() {
     mainWindow = new BrowserWindow({

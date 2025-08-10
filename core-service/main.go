@@ -129,8 +129,8 @@ func main() {
 // Run as console application
 func runConsole() {
 	config := &Config{
-		DNSPort:      "53",
-		APIPort:      "8080",
+		DNSPort:      "5353",
+		APIPort:      "8081",
 		UpstreamDNS:  "1.1.1.1:53",
 		LogLevel:     "INFO",
 		DatabasePath: "./data/parental_control.db",
@@ -145,7 +145,7 @@ func runConsole() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go service.StartDNSServer(ctx)
+	// go service.StartDNSServer(ctx)
 	go service.StartAPIServer(ctx)
 
 	// Wait for shutdown signal
@@ -184,8 +184,8 @@ func (m *parentalControlService) Execute(args []string, r <-chan svc.ChangeReque
 
 	// Initialize core service
 	config := &Config{
-		DNSPort:      "53",
-		APIPort:      "8080",
+		DNSPort:      "5353",
+		APIPort:      "8081",
 		UpstreamDNS:  "1.1.1.1:53",
 		LogLevel:     "INFO",
 		DatabasePath: "C:\\ProgramData\\ParentalControl\\parental_control.db",
